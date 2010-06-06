@@ -133,6 +133,10 @@ rule
                           {
                             nil
                           }
+                        | LIMIT NUMBER
+                          {
+                            val[1]
+                          }
                         | LIMIT STRING
                           {
                             val[1]
@@ -141,6 +145,10 @@ rule
   offset_clause          :
                           {
                             nil
+                          }
+                        | OFFSET NUMBER
+                          {
+                            val[1]
                           }
                         | OFFSET STRING
                           {
