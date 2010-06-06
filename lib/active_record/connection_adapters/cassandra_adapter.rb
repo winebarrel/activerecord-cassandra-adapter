@@ -76,18 +76,20 @@ module ActiveRecord
         log(sql, name)
 
         parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
-        cf = parsed_sql[:table].to_sym
+        table = parsed_sql[:table]
+        cf = table.to_sym
         column_list = parsed_sql[:column_list]
         value_list = parsed_sql[:value_list]
 
-        guid = SimpleUUID::UUID.new.to_guid
+        class_name = ActiveRecord::Base.class_name(table)
+        rowid = Module.const_get(class_name).__identify.to_s
 
         nvs = {}
         column_list.zip(value_list).each {|n, v| nvs[n] = v.to_s }
 
-        @connection.insert(cf, guid, nvs)
+        @connection.insert(cf, rowid, nvs)
 
-        return guid
+        return rowid
       end
 
       def update_sql(sql, name = nil)

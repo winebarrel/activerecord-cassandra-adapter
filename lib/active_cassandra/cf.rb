@@ -59,6 +59,22 @@ module ActiveCassandra
             @@__timestamp = \#{value}
           EOS
         end
+
+        def identifier(value)
+          unless value.kind_of?(Proc) and value.arity <= 0 
+            raise ArgumentError, "Incorrect identifier: \#{value}"
+          end
+
+          @__identifier = value
+        end
+
+        def __identify
+          if @__identifier
+            @__identifier.call
+          else
+            SimpleUUID::UUID.new.to_guid
+          end
+        end
       }
 
       mod.instance_eval %{
