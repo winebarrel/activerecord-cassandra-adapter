@@ -92,6 +92,8 @@ module ActiveRecord
           nvs[n] = v.to_s
         end
 
+        n = 0
+
         if is_id?(cond)
           ks = [cond].flatten
           rs = @connection.multi_get(cf, ks)
@@ -99,17 +101,22 @@ module ActiveRecord
           ks.each do |key|
             row = rs[key]
             @connection.insert(cf, key, row.merge(nvs))
+            n += 1
           end
         else
-          raise 'not implemented'
-          #@connection.get_range(cf, options).each do |key_slice|
-          #  row = key_slice_to_hash(key_slice)
-          #  @connection.insert(cf, key_slice.key, row.merge(nvs))
-          #end
+          rows = @connection.get_range(cf).select {|i| i.columns.length > 0 }.map do |key_slice|
+            key_slice_to_hash(key_slice)
+          end
+
+          rows = filter(cond).call(rows) unless cond.empty?
+
+          rows.each do |row|
+            @connection.insert(cf, row['id'], row.merge(nvs))
+            n += 1
+          end
         end
 
-        # XXX:
-        1
+        return n
       end
 
       def delete_sql(sql, name = nil)
@@ -119,19 +126,33 @@ module ActiveRecord
         cf = parsed_sql[:table].to_sym
         cond = parsed_sql[:condition]
 
+        n = 0
+
         if is_id?(cond)
           [cond].flatten.each do |key|
             @connection.remove(cf, key)
+            n += 1
           end
         else
-          raise 'not implemented'
-          #@connection.get_range(cf, options).each do |key_slice|
-          #  @connection.remove(cf, key_slice.key)
-          #end
+          rows = @connection.get_range(cf).select {|i| i.columns.length > 0 }
+
+          unless cond.empty?
+            rows = rows.map {|i| key_slice_to_hash(i) }
+            rows = filter(cond).call(rows)
+
+            rows.each do |row|
+              @connection.remove(cf, row['id'])
+              n += 1
+            end
+          else
+            rows.each do |key_slice|
+              @connection.remove(cf, key_slice.key)
+              n += 1
+            end
+          end
         end
 
-        # XXX:
-        1
+        return n
       end
 
       private
@@ -175,7 +196,7 @@ module ActiveRecord
         end
 
         lambda do |rows|
-          fs.inject(rows) {|r, f| r.select{|i| f.call(i) } }
+          fs.inject(rows) {|r, f| r.select {|i| f.call(i) } }
         end
       end
     end # class CassandraAdapter
