@@ -44,7 +44,7 @@ module ActiveRecord
         count = parsed_sql[:count]
         # not implemented:
         # distinct = parsed_sql[:distinct]
-        options = {} # XXX:
+        options = rowopts(parsed_sql)
 
         if count and cond.empty?
           [{count => @connection.count_range(cf, options)}]
@@ -155,6 +155,16 @@ module ActiveRecord
         return n
       end
 
+      def add_limit_offset!(sql, options)
+        if (limit = options[:limit])
+          sql << " LIMIT #{quote(limit)}"
+        end
+
+        if (offset = options[:offset])
+          sql << " OFFSET #{quote(offset)}"
+        end
+      end
+
       private
       def key_slice_to_hash(key_slice)
         hash = {'id' => key_slice.key}
@@ -199,6 +209,30 @@ module ActiveRecord
           fs.inject(rows) {|r, f| r.select {|i| f.call(i) } }
         end
       end
+
+      def rowopts(parsed_sql)
+        order, limit, offset = parsed_sql.values_at(:order, :limit, :offset)
+        options = {}
+
+        # not implemented:
+        # if order
+        #   name, type = order.values_at(:name, :type)
+        #   ...
+        # end
+
+        # XXX: offset is not equals to SQL OFFSET
+        if offset
+          options[:start] = offset
+        end
+
+        # XXX: limit is not equals to SQL LIMIT
+        if limit
+          options[:finish] = limit
+        end
+
+        return options
+      end
+
     end # class CassandraAdapter
   end # module ConnectionAdapters
 end # module ActiveRecord

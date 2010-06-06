@@ -133,7 +133,7 @@ rule
                           {
                             nil
                           }
-                        | LIMIT NUMBER
+                        | LIMIT STRING
                           {
                             val[1]
                           }
@@ -142,7 +142,7 @@ rule
                           {
                             nil
                           }
-                        | OFFSET NUMBER
+                        | OFFSET STRING
                           {
                             val[1]
                           }
