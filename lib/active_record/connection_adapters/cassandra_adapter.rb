@@ -76,7 +76,6 @@ module ActiveRecord
         log(sql, name)
 
         parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
-        p parsed_sql
         cf = parsed_sql[:table].to_sym
         column_list = parsed_sql[:column_list]
         value_list = parsed_sql[:value_list]
