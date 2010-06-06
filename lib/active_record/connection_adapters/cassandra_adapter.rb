@@ -44,19 +44,30 @@ module ActiveRecord
         count = parsed_sql[:count]
         # not implemented:
         # distinct = parsed_sql[:distinct]
-        options = rowopts(parsed_sql)
+        sqlopts, casopts = rowopts(parsed_sql)
 
-        if count and cond.empty?
-          [{count => @connection.count_range(cf, options)}]
+        if count and cond.empty? and sqlopts.empty?
+          [{count => @connection.count_range(cf, casopts)}]
         elsif is_id?(cond)
           ks = [cond].flatten
-          @connection.multi_get(cf, ks, options).values
+          @connection.multi_get(cf, ks, casopts).values
         else
-          rows = @connection.get_range(cf, options).select {|i| i.columns.length > 0 }.map do |key_slice|
+          rows = @connection.get_range(cf, casopts).select {|i| i.columns.length > 0 }.map do |key_slice|
             key_slice_to_hash(key_slice)
           end
 
-          rows = filter(cond).call(rows) unless cond.empty?
+          unless cond.empty?
+            rows = filter(cond).call(rows)
+          end
+
+          if (offset = sqlopts[:offset])
+            rows = rows.slice(offset..-1)
+          end
+
+          if (limit = sqlopts[:limit])
+            rows = rows.slice(0, limit)
+          end
+
           count ? [{count => rows.length}] : rows
         end
       end
@@ -108,7 +119,9 @@ module ActiveRecord
             key_slice_to_hash(key_slice)
           end
 
-          rows = filter(cond).call(rows) unless cond.empty?
+          unless cond.empty?
+            rows = filter(cond).call(rows)
+          end
 
           rows.each do |row|
             @connection.insert(cf, row['id'], row.merge(nvs))
@@ -157,11 +170,19 @@ module ActiveRecord
 
       def add_limit_offset!(sql, options)
         if (limit = options[:limit])
-          sql << " LIMIT #{quote(limit)}"
+          if limit.kind_of?(Numeric)
+            sql << " LIMIT #{limit.to_i}"
+          else
+            sql << " LIMIT #{quote(limit)}"
+          end
         end
 
         if (offset = options[:offset])
-          sql << " OFFSET #{quote(offset)}"
+          if offset.kind_of?(Numeric)
+            sql << " OFFSET #{offset.to_i}"
+          else
+            sql << " OFFSET #{quote(offset)}"
+          end
         end
       end
 
@@ -212,7 +233,8 @@ module ActiveRecord
 
       def rowopts(parsed_sql)
         order, limit, offset = parsed_sql.values_at(:order, :limit, :offset)
-        options = {}
+        sqlopts = {}
+        casopts = {}
 
         # not implemented:
         # if order
@@ -220,17 +242,25 @@ module ActiveRecord
         #   ...
         # end
 
-        # XXX: offset is not equals to SQL OFFSET
         if offset
-          options[:start] = offset
+          if offset.kind_of?(Numeric)
+            sqlopts[:offset] = offset
+          else
+            # XXX: offset is not equals to SQL OFFSET
+            casopts[:start] = offset
+          end
         end
 
-        # XXX: limit is not equals to SQL LIMIT
         if limit
-          options[:finish] = limit
+          if limit.kind_of?(Numeric)
+            sqlopts[:limit] = limit
+          else
+            # XXX: limit is not equals to SQL LIMIT
+            casopts[:finish] = limit
+          end
         end
 
-        return options
+        return [sqlopts, casopts]
       end
 
     end # class CassandraAdapter

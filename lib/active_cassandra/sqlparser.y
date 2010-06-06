@@ -135,7 +135,7 @@ rule
                           }
                         | LIMIT NUMBER
                           {
-                            val[1]
+                            val[1].to_i
                           }
                         | LIMIT STRING
                           {
@@ -148,7 +148,7 @@ rule
                           }
                         | OFFSET NUMBER
                           {
-                            val[1]
+                            val[1].to_i
                           }
                         | OFFSET STRING
                           {
