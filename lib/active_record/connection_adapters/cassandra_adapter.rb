@@ -46,15 +46,18 @@ module ActiveRecord
         # distinct = parsed_sql[:distinct]
         options = {} # XXX:
 
-        if count # XXX:
+        if count and cond.empty?
           [{count => @connection.count_range(cf, options)}]
         elsif is_id?(cond)
           ks = [cond].flatten
           @connection.multi_get(cf, ks, options).values
         else
-          @connection.get_range(cf, options).map do |key_slice|
+          rows = @connection.get_range(cf, options).select {|i| i.columns.length > 0 }.map do |key_slice|
             key_slice_to_hash(key_slice)
           end
+
+          rows = filter(cond).call(rows) unless cond.empty?
+          count ? [{count => rows.length}] : rows
         end
       end
 
@@ -62,7 +65,8 @@ module ActiveRecord
         log(sql, name)
 
         parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
-        cf = parsed_sql.values_at[:table].to_sym
+        p parsed_sql
+        cf = parsed_sql[:table].to_sym
         column_list = parsed_sql[:column_list]
         value_list = parsed_sql[:value_list]
 
@@ -144,6 +148,35 @@ module ActiveRecord
 
       def is_id?(cond)
         not cond.kind_of?(Array) or not cond.all? {|i| i.kind_of?(Hash) }
+      end
+
+      def filter(cond)
+        fs = []
+
+        cond.each do |c|
+          name, op, expr, has_not = c.values_at(:name, :op, :expr, :not)
+          name = name.split('.').last
+          expr = Regexp.compile(expr) if op == '$regexp'
+
+          func = case op
+                 when '$in'
+                   lambda {|i| expr.include?(i) }
+                 when '$bt'
+                   lambda {|i| expr[0] <= i and i <= expr[1] }
+                 when '$regexp'
+                   lambda {|i| i =~ Regexp.compile(expr) }
+                 when :'>=', :'<=', :'>', :'<'
+                   lambda {|i| i.to_i.send(op, expr.to_i) }
+                 else
+                   lambda {|i| i.send(op, expr) }
+                 end
+
+          fs << (has_not ? lambda {|row| not func.call(row[name]) } : lambda {|row| func.call(row[name])})
+        end
+
+        lambda do |rows|
+          fs.inject(rows) {|r, f| r.select{|i| f.call(i) } }
+        end
       end
     end # class CassandraAdapter
   end # module ConnectionAdapters

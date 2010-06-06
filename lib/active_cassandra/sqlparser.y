@@ -101,12 +101,17 @@ rule
                           {
                             {:name => val[1], :op => val[2], :expr => val[4], :not => true}
                           }
+                        | between_predicate
                         | not_in_predicate
 
+  between_predicate     : id BETWEEN value AND value
+                          {
+                            {:name => val[0], :op => '$bt', :expr => [val[2], val[4]]}
+                          }
 
   not_in_predicate     : id NOT IN '(' value_list ')'
                           {
-                            {:name => val[0], :op => '$nin', :expr => val[4]}
+                            {:name => val[0], :op => '$in', :expr => val[4], :not => true}
                           }
 
   order_by_clause       :
@@ -188,8 +193,14 @@ rule
                           }
 
   op                    : IN     { '$in'     }
-                        | EXISTS { '$exists' }
-                        | '='    { '$eq'     }
+                        | REGEXP { '$regexp' }
+                        | '<>'   { :'!='     }
+                        | '!='   { :'!='     }
+                        | '>='   { :'>='     }
+                        | '<='   { :'<='     }
+                        | '>'    { :'>'      }
+                        | '<'    { :'<'      }
+                        | '='    { :'=='     }
 
   order_spec            : ASC  { :asc  }
                         | DESC { :desc }
@@ -208,12 +219,12 @@ KEYWORDS = %w(
   AND
   AS
   ASC
+  BETWEEN
   BY
   COUNT
   DELETE
   DESC
   DISTINCT
-  EXISTS
   FROM
   IN
   INSERT
@@ -222,6 +233,7 @@ KEYWORDS = %w(
   NOT
   OFFSET
   ORDER
+  REGEXP
   SELECT
   SET
   UPDATE
@@ -242,7 +254,7 @@ def scan
   until @ss.eos?
     if (tok = @ss.scan /\s+/)
       # nothing to do
-    elsif (tok = @ss.scan /(?:=)/)
+    elsif (tok = @ss.scan /(?:<>|!=|>=|<=|>|<|=)/)
       yield tok, tok
     elsif (tok = @ss.scan KEYWORD_REGEXP)
       yield tok.upcase.to_sym, tok
