@@ -40,6 +40,10 @@ rule
                           {
                             []
                           }
+                        | id '.' '*'
+                          {
+                            []
+                          }
                         | id_list
 
   where_clause          :
@@ -274,12 +278,12 @@ def scan
       yield :NUMBER, tok.to_f
     elsif (tok = @ss.scan /-?(?:0|[1-9]\d*)/)
       yield :NUMBER, tok.to_i
-    elsif (tok = @ss.scan /[,\(\)\*]/)
-      yield tok, tok
     elsif (tok = @ss.scan /(?:[a-z_]\w+\.|[a-z]\.)*ID\b/i)
       yield :ID, tok
     elsif (tok = @ss.scan /(?:[a-z_]\w+\.|[a-z]\.)*(?:[a-z_]\w+|[a-z])/i)
       yield :IDENTIFIER, tok
+    elsif (tok = @ss.scan /[,\(\)\*\.]/)
+      yield tok, tok
     else
       raise Racc::ParseError, ('parse error on value "%s"' % @ss.rest.inspect)
     end

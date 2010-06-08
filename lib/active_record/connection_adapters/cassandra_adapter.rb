@@ -34,139 +34,147 @@ module ActiveRecord
         false
       end
 
+      def adapter_name
+        "cassandra"
+      end
+
+      def tables
+      end
+
       def select(sql, name = nil)
-        log(sql, name)
+        log(sql, name) do
+          parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
 
-        parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
+          cf = parsed_sql[:table].to_sym
+          cond = parsed_sql[:condition]
+          count = parsed_sql[:count]
+          # not implemented:
+          # distinct = parsed_sql[:distinct]
+          sqlopts, casopts = rowopts(parsed_sql)
 
-        cf = parsed_sql[:table].to_sym
-        cond = parsed_sql[:condition]
-        count = parsed_sql[:count]
-        # not implemented:
-        # distinct = parsed_sql[:distinct]
-        sqlopts, casopts = rowopts(parsed_sql)
+          if count and cond.empty? and sqlopts.empty?
+            [{count => @connection.count_range(cf, casopts)}]
+          elsif is_id?(cond)
+            ks = [cond].flatten
+            @connection.multi_get(cf, ks, casopts).values
+          else
+            rows = @connection.get_range(cf, casopts).select {|i| i.columns.length > 0 }.map do |key_slice|
+              key_slice_to_hash(key_slice)
+            end
 
-        if count and cond.empty? and sqlopts.empty?
-          [{count => @connection.count_range(cf, casopts)}]
-        elsif is_id?(cond)
-          ks = [cond].flatten
-          @connection.multi_get(cf, ks, casopts).values
-        else
-          rows = @connection.get_range(cf, casopts).select {|i| i.columns.length > 0 }.map do |key_slice|
-            key_slice_to_hash(key_slice)
+            unless cond.empty?
+              rows = filter(cond).call(rows)
+            end
+
+            if (offset = sqlopts[:offset])
+              rows = rows.slice(offset..-1)
+            end
+
+            if (limit = sqlopts[:limit])
+              rows = rows.slice(0, limit)
+            end
+
+            count ? [{count => rows.length}] : rows
           end
-
-          unless cond.empty?
-            rows = filter(cond).call(rows)
-          end
-
-          if (offset = sqlopts[:offset])
-            rows = rows.slice(offset..-1)
-          end
-
-          if (limit = sqlopts[:limit])
-            rows = rows.slice(0, limit)
-          end
-
-          count ? [{count => rows.length}] : rows
-        end
+        end # log
       end
 
       def insert_sql(sql, name = nil, pk = nil, id_value = nil, sequence_name = nil)
-        log(sql, name)
+        log(sql, name) do
+          parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
+          table = parsed_sql[:table]
+          cf = table.to_sym
+          column_list = parsed_sql[:column_list]
+          value_list = parsed_sql[:value_list]
 
-        parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
-        table = parsed_sql[:table]
-        cf = table.to_sym
-        column_list = parsed_sql[:column_list]
-        value_list = parsed_sql[:value_list]
+          class_name = ActiveRecord::Base.class_name(table)
+          rowid = Module.const_get(class_name).__identify.to_s
 
-        class_name = ActiveRecord::Base.class_name(table)
-        rowid = Module.const_get(class_name).__identify.to_s
+          nvs = {}
+          column_list.zip(value_list).each {|n, v| nvs[n] = v.to_s }
 
-        nvs = {}
-        column_list.zip(value_list).each {|n, v| nvs[n] = v.to_s }
+          @connection.insert(cf, rowid, nvs)
 
-        @connection.insert(cf, rowid, nvs)
-
-        return rowid
+          rowid
+        end # log
       end
 
       def update_sql(sql, name = nil)
-        log(sql, name)
-        parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
-        cf = parsed_sql[:table].to_sym
-        cond = parsed_sql[:condition]
+        log(sql, name) do
+          parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
+          cf = parsed_sql[:table].to_sym
+          cond = parsed_sql[:condition]
 
-        nvs = {}
-        parsed_sql[:set_clause_list].each do |n, v|
-          n = n.split('.').last
-          nvs[n] = v.to_s
-        end
-
-        n = 0
-
-        if is_id?(cond)
-          ks = [cond].flatten
-          rs = @connection.multi_get(cf, ks)
-
-          ks.each do |key|
-            row = rs[key]
-            @connection.insert(cf, key, row.merge(nvs))
-            n += 1
-          end
-        else
-          rows = @connection.get_range(cf).select {|i| i.columns.length > 0 }.map do |key_slice|
-            key_slice_to_hash(key_slice)
+          nvs = {}
+          parsed_sql[:set_clause_list].each do |n, v|
+            n = n.split('.').last
+            nvs[n] = v.to_s
           end
 
-          unless cond.empty?
-            rows = filter(cond).call(rows)
-          end
+          n = 0
 
-          rows.each do |row|
-            @connection.insert(cf, row['id'], row.merge(nvs))
-            n += 1
-          end
-        end
+          if is_id?(cond)
+            ks = [cond].flatten
+            rs = @connection.multi_get(cf, ks)
 
-        return n
-      end
-
-      def delete_sql(sql, name = nil)
-        log(sql, name)
-
-        parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
-        cf = parsed_sql[:table].to_sym
-        cond = parsed_sql[:condition]
-
-        n = 0
-
-        if is_id?(cond)
-          [cond].flatten.each do |key|
-            @connection.remove(cf, key)
-            n += 1
-          end
-        else
-          rows = @connection.get_range(cf).select {|i| i.columns.length > 0 }
-
-          unless cond.empty?
-            rows = rows.map {|i| key_slice_to_hash(i) }
-            rows = filter(cond).call(rows)
-
-            rows.each do |row|
-              @connection.remove(cf, row['id'])
+            ks.each do |key|
+              row = rs[key]
+              @connection.insert(cf, key, row.merge(nvs))
               n += 1
             end
           else
-            rows.each do |key_slice|
-              @connection.remove(cf, key_slice.key)
+            rows = @connection.get_range(cf).select {|i| i.columns.length > 0 }.map do |key_slice|
+              key_slice_to_hash(key_slice)
+            end
+
+            unless cond.empty?
+              rows = filter(cond).call(rows)
+            end
+
+            rows.each do |row|
+              @connection.insert(cf, row['id'], row.merge(nvs))
               n += 1
             end
           end
-        end
 
-        return n
+          n
+        end # log
+      end
+
+      def delete_sql(sql, name = nil)
+        log(sql, name) do
+          parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
+          cf = parsed_sql[:table].to_sym
+          cond = parsed_sql[:condition]
+
+          n = 0
+
+          if is_id?(cond)
+            [cond].flatten.each do |key|
+              @connection.remove(cf, key)
+              n += 1
+            end
+          else
+            rows = @connection.get_range(cf).select {|i| i.columns.length > 0 }
+
+            unless cond.empty?
+              rows = rows.map {|i| key_slice_to_hash(i) }
+              rows = filter(cond).call(rows)
+
+              rows.each do |row|
+                @connection.remove(cf, row['id'])
+                n += 1
+              end
+            else
+              rows.each do |key_slice|
+                @connection.remove(cf, key_slice.key)
+                n += 1
+              end
+            end
+          end
+
+          n
+        end # log
       end
 
       def add_limit_offset!(sql, options)
