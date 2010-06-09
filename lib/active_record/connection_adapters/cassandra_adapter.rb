@@ -41,6 +41,9 @@ module ActiveRecord
       def tables
       end
 
+      def primary_key(table)
+      end
+
       def select(sql, name = nil)
         log(sql, name) do
           parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
