@@ -31,8 +31,12 @@ gem install activerecord-cassandra-adapter
 
     class Employee < ActiveRecord::Base
       include ActiveCassandra::CF
-
       # identifier lambda { Time.now.tv_sec }
+
+      # type: string, int, float, datetime, timestamp
+      int    :emp_no
+      string :ename
+      int    :age
     end
 
 === ActiveRecord API
