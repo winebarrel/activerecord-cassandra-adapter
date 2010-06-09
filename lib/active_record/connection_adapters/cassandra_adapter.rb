@@ -70,15 +70,22 @@ module ActiveRecord
           elsif is_id?(cond)
             ks = [cond].flatten
             rs = @connection.multi_get(cf, ks, casopts)
+            rows = []
 
-            ks.select {|i| i.columns.length > 0 }.map do |k|
+            ks.each do |k|
               row = rs[k]
+              next if row.empty?
               row['id'] = k
-              row
+              rows << row
             end
+
+            rows
           else
-            rows = @connection.get_range(cf, casopts).select {|i| i.columns.length > 0 }.map do |key_slice|
-              key_slice_to_hash(key_slice)
+            rows = []
+
+            @connection.get_range(cf, casopts).each do |key_slice|
+              next if key_slice.columns.length.zero?
+              rows << key_slice_to_hash(key_slice)
             end
 
             unless cond.empty?
