@@ -30,6 +30,11 @@ module ActiveRecord
         @config = config
       end
 
+      def columns(table_name, name = nil)
+        class_name = ActiveRecord::Base.class_name(table_name)
+        Module.const_get(class_name).columns
+      end
+
       def supports_count_distinct?
         false
       end
@@ -39,6 +44,11 @@ module ActiveRecord
       end
 
       def tables
+        []
+      end
+
+      def table_exists?(table)
+        true
       end
 
       def primary_key(table)
@@ -59,7 +69,13 @@ module ActiveRecord
             [{count => @connection.count_range(cf, casopts)}]
           elsif is_id?(cond)
             ks = [cond].flatten
-            @connection.multi_get(cf, ks, casopts).values
+            rs = @connection.multi_get(cf, ks, casopts)
+
+            ks.select {|i| i.columns.length > 0 }.map do |k|
+              row = rs[k]
+              row['id'] = k
+              row
+            end
           else
             rows = @connection.get_range(cf, casopts).select {|i| i.columns.length > 0 }.map do |key_slice|
               key_slice_to_hash(key_slice)
