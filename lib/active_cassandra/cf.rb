@@ -19,7 +19,7 @@ module ActiveCassandra
             end
 
             @columns << ActiveRecord::ConnectionAdapters::Column.new(name.to_s, nil, '#{type}')
-            class_eval "def \#{name}; v = self[:\#{name}]; (v.nil? || v.empty?) ? nil : v.#{conv}; end"
+            class_eval "def \#{name}; v = self[:\#{name}]; (v.nil? || v.blank?) ? nil : v.#{conv}; end"
           end
         }
       end
