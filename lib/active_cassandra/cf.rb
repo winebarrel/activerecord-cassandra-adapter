@@ -45,6 +45,32 @@ module ActiveCassandra
           client = self.connection.raw_connection
           block_given? ? yield(client) : client
         end
+
+        def associate(table, options = {})
+          @__relations ||= {}
+          @__relations[table.to_sym] = options
+
+          class_eval <<-EOS
+            def \#{table}
+              class_name = ActiveRecord::Base.class_name('\#{table}')
+              klass = Module.const_get(class_name)
+              ids = self.connection.__has_many_ids(self, '\#{table}')
+              ids.blank? ? [] : klass.all(:conditions => {:id => ids})
+            end
+
+            def add_\#{table.to_s.singularize}(child)
+              self.connection.__associate_from_cassandra(self, child)
+            end
+
+            def remove_\#{table.to_s.singularize}(child)
+              self.connection.__unassociate_from_cassandra(self, child)
+            end
+          EOS
+        end
+
+        def __relations
+          @__relations
+        end
       }
     end
   end

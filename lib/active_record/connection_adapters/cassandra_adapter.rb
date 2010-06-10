@@ -137,16 +137,14 @@ module ActiveRecord
 
           if is_id?(cond)
             ks = [cond].flatten
-            rs = @connection.multi_get(cf, ks, SELF_KEY)
 
             ks.each do |key|
-              row = rs[key]
-              @connection.insert(cf, key, {SELF_KEY => row.merge(nvs)})
+              @connection.insert(cf, key, {SELF_KEY => nvs})
               n += 1
             end
           else
-            select_with_condition(cf, cond) do |row|
-              @connection.insert(cf, row['id'], {SELF_KEY => row.merge(nvs)})
+            select_with_condition(cf, cond, :key_only => true) do |k|
+              @connection.insert(cf, k, {SELF_KEY => nvs})
               n += 1
             end
           end
@@ -169,16 +167,9 @@ module ActiveRecord
               n += 1
             end
           else # is_id?(cond)
-            if cond.empty?
-              rows.each do |key_slice|
-                @connection.remove(cf, key_slice.key)
-                n += 1
-              end
-            else
-              select_with_condition(cf, cond) do |row|
-                @connection.remove(cf, row['id'])
-                n += 1
-              end
+            select_with_condition(cf, cond, :key_only => true) do |k|
+              @connection.remove(cf, k)
+              n += 1
             end
           end # is_id?(cond)
 
@@ -204,45 +195,130 @@ module ActiveRecord
         end
       end
 
+      def __has_many_ids(parent, child_table)
+        parent_table = parent.class.table_name
+        @connection.get(parent_table.to_sym, parent.id, child_table.to_s).values
+      end
+
+      def __associate_from_cassandra(parent, child)
+        return false if (parent.blank? or child.blank?)
+
+        relation = (parent.class.__relations || {})[child.class.table_name.to_sym]
+        return false unless relation
+
+        __associate_without_cascade(parent, child, relation)
+
+        if relation[:cascade] == :rdb
+          # XXX:
+        elsif relation[:cascade]
+          __associate_without_cascade(child, parent, relation)
+        end
+
+        return true
+      end
+
+      def __unassociate_from_cassandra(parent, child)
+        return false if (parent.blank? or child.blank?)
+
+        relation = (parent.class.__relations || {})[child.class.table_name.to_sym]
+        return false unless relation
+
+        __unassociate_without_cascade(parent, child, relation)
+
+        if relation[:cascade] == :rdb
+          # XXX:
+        elsif relation[:cascade]
+          __unassociate_without_cascade(child, parent, relation)
+        end
+
+        return true
+      end
+
       private #######################################################
 
+      def __associate_without_cascade(parent, child, relation)
+        identity = relation[:identifier] ?  relation[:identifier].call : child.id
+        @connection.insert(parent.class.table_name.to_sym, parent.id, {child.class.table_name => {identity => child.id}})
+      end
+
+      def __unassociate_without_cascade(parent, child, relation)
+        @connection.remove(parent.class.table_name.to_sym, parent.id, child.class.table_name, child.id)
+      end
+
       def select_with_condition(cf, cond, casopts = {})
+        key_only = casopts.delete(:key_only)
         rs = @connection.get_range(cf, casopts)
         selector = filter(cond)
 
-        if block_given?
-          if cond.empty?
-            rs.each {|key_slice|
-              next if key_slice.columns.length.zero?
-              row = key_slice_to_hash(key_slice)
-              yield(row)
-            }
-          else
-            rs.each {|key_slice|
-              next if key_slice.columns.length.zero?
-              row = key_slice_to_hash(key_slice)
-              yield(row) if selector.call(row)
-            }
-          end
-        else # if block_given?
-          rows = []
+        if key_only
+          if block_given?
+            if cond.empty?
+              rs.each {|key_slice|
+                next if key_slice.columns.length.zero?
+                row = key_slice.key
+                yield(row)
+              }
+            else
+              rs.each {|key_slice|
+                next if key_slice.columns.length.zero?
+                row = key_slice_to_hash(key_slice)
+                yield(row['id']) if selector.call(row)
+              }
+            end
+          else # if block_given?
+            rows = []
 
-          if cond.empty?
-            rs.each {|key_slice|
-              next if key_slice.columns.length.zero?
-              row = key_slice_to_hash(key_slice)
-              rows << row
-            }
-          else
-            rs.each {|key_slice|
-              next if key_slice.columns.length.zero?
-              row = key_slice_to_hash(key_slice)
-              rows << row if selector.call(row)
-            }
-          end
+            if cond.empty?
+              rs.each {|key_slice|
+                next if key_slice.columns.length.zero?
+                row = key_slice.key
+                rows << row
+              }
+            else
+              rs.each {|key_slice|
+                next if key_slice.columns.length.zero?
+                row = key_slice_to_hash(key_slice)
+                rows << row['id'] if selector.call(row)
+              }
+            end
 
-          return rows
-        end # if block_given?
+            return rows
+          end # if block_given?
+        else # if key_only
+          if block_given?
+            if cond.empty?
+              rs.each {|key_slice|
+                next if key_slice.columns.length.zero?
+                row = key_slice_to_hash(key_slice)
+                yield(row)
+              }
+            else
+              rs.each {|key_slice|
+                next if key_slice.columns.length.zero?
+                row = key_slice_to_hash(key_slice)
+                yield(row) if selector.call(row)
+              }
+            end
+          else # if block_given?
+            rows = []
+
+            if cond.empty?
+              rs.each {|key_slice|
+                next if key_slice.columns.length.zero?
+                row = key_slice_to_hash(key_slice)
+                rows << row
+              }
+            else
+              rs.each {|key_slice|
+                next if key_slice.columns.length.zero?
+                row = key_slice_to_hash(key_slice)
+                rows << row if selector.call(row)
+              }
+            end
+
+            return rows
+          end # if block_given?
+        end # if key_only
       end
 
       def key_slice_to_hash(key_slice)
