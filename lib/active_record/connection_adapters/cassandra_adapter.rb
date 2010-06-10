@@ -259,13 +259,13 @@ module ActiveRecord
                  when '$in'
                    lambda {|i| expr.include?(i) }
                  when '$bt'
-                   lambda {|i| expr[0] <= i and i <= expr[1] }
+                   lambda {|i| expr[0].to_i <= i and i <= expr[1].to_i }
                  when '$regexp'
-                   lambda {|i| i =~ Regexp.compile(expr) }
+                   lambda {|i| i.to_s =~ Regexp.compile(expr) }
                  when :'>=', :'<=', :'>', :'<'
                    lambda {|i| i.to_i.send(op, expr.to_i) }
                  else
-                   lambda {|i| i.send(op, expr) }
+                   lambda {|i| i.send(op, expr.to_s) }
                  end
 
           fs << (has_not ? lambda {|row| not func.call(row[name]) } : lambda {|row| func.call(row[name])})
