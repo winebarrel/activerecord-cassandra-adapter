@@ -328,10 +328,6 @@ module ActiveRecord
 
         return [sqlopts, casopts]
       end
-
-      def get_exist_range(cf)
-        @connection.get_range(cf).select {|i| i.columns.length > 0 }
-      end
     end # class CassandraAdapter
   end # module ConnectionAdapters
 end # module ActiveRecord
