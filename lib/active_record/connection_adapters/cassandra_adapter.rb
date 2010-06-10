@@ -123,7 +123,8 @@ module ActiveRecord
           nvs = {}
           column_list.zip(value_list).each {|n, v| nvs[n] = v.to_s }
 
-          @connection.insert(cf, rowid, nvs)
+          # XXX: insert with relation info
+          @connection.insert(cf, rowid, {SELF_KEY => nvs})
 
           rowid
         end # log
