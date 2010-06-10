@@ -289,9 +289,6 @@ module ActiveRecord
           fs << (has_not ? lambda {|row| not func.call(row[name]) } : lambda {|row| func.call(row[name])})
         end
 
-        #lambda do |rows|
-        #  fs.inject(rows) {|r, f| r.select {|i| f.call(i) } }
-        #end
         lambda do |row|
           fs.all? {|f| f.call(row) }
         end
