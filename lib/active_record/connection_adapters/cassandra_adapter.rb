@@ -154,7 +154,7 @@ module ActiveRecord
               n += 1
             end
           else
-            rows = @connection.get_range(cf).select {|i| i.columns.length > 0 }.map do |key_slice|
+            rows = get_exist_range(cf).map do |key_slice|
               key_slice_to_hash(key_slice)
             end
 
@@ -186,7 +186,7 @@ module ActiveRecord
               n += 1
             end
           else
-            rows = @connection.get_range(cf).select {|i| i.columns.length > 0 }
+            rows = get_exist_range(cf)
 
             unless cond.empty?
               rows = rows.map {|i| key_slice_to_hash(i) }
@@ -308,6 +308,9 @@ module ActiveRecord
         return [sqlopts, casopts]
       end
 
+      def get_exist_range(cf)
+        @connection.get_range(cf).select {|i| i.columns.length > 0 }
+      end
     end # class CassandraAdapter
   end # module ConnectionAdapters
 end # module ActiveRecord
