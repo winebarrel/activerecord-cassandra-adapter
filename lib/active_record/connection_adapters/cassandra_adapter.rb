@@ -83,16 +83,7 @@ module ActiveRecord
 
             rows
           else
-            rows = []
-
-            @connection.get_range(cf, casopts).each do |key_slice|
-              next if key_slice.columns.length.zero?
-              rows << key_slice_to_hash(key_slice)
-            end
-
-            unless cond.empty?
-              rows = filter(cond).call(rows)
-            end
+            rows = select_with_condition(cf, cond, casopts)
 
             if (offset = sqlopts[:offset])
               rows = rows.slice(offset..-1)
@@ -154,15 +145,7 @@ module ActiveRecord
               n += 1
             end
           else
-            rows = get_exist_range(cf).map do |key_slice|
-              key_slice_to_hash(key_slice)
-            end
-
-            unless cond.empty?
-              rows = filter(cond).call(rows)
-            end
-
-            rows.each do |row|
+            select_with_condition(cf, cond) do |row|
               @connection.insert(cf, row['id'], {SELF_KEY => row.merge(nvs)})
               n += 1
             end
@@ -185,24 +168,19 @@ module ActiveRecord
               @connection.remove(cf, key)
               n += 1
             end
-          else
-            rows = get_exist_range(cf)
-
-            unless cond.empty?
-              rows = rows.map {|i| key_slice_to_hash(i) }
-              rows = filter(cond).call(rows)
-
-              rows.each do |row|
-                @connection.remove(cf, row['id'])
-                n += 1
-              end
-            else
+          else # is_id?(cond)
+            if cond.empty?
               rows.each do |key_slice|
                 @connection.remove(cf, key_slice.key)
                 n += 1
               end
+            else
+              select_with_condition(cf, cond) do |row|
+                @connection.remove(cf, row['id'])
+                n += 1
+              end
             end
-          end
+          end # is_id?(cond)
 
           n
         end # log
@@ -226,7 +204,47 @@ module ActiveRecord
         end
       end
 
-      private
+      private #######################################################
+
+      def select_with_condition(cf, cond, casopts = {})
+        rs = @connection.get_range(cf, casopts)
+        selector = filter(cond)
+
+        if block_given?
+          if cond.empty?
+            rs.each {|key_slice|
+              next if key_slice.columns.length.zero?
+              row = key_slice_to_hash(key_slice)
+              yield(row)
+            }
+          else
+            rs.each {|key_slice|
+              next if key_slice.columns.length.zero?
+              row = key_slice_to_hash(key_slice)
+              yield(row) if selector.call(row)
+            }
+          end
+        else # if block_given?
+          rows = []
+
+          if cond.empty?
+            rs.each {|key_slice|
+              next if key_slice.columns.length.zero?
+              row = key_slice_to_hash(key_slice)
+              rows << row
+            }
+          else
+            rs.each {|key_slice|
+              next if key_slice.columns.length.zero?
+              row = key_slice_to_hash(key_slice)
+              rows << row if selector.call(row)
+            }
+          end
+
+          return rows
+        end # if block_given?
+      end
+
       def key_slice_to_hash(key_slice)
         hash = {'id' => key_slice.key}
         super_column = nil
@@ -271,8 +289,11 @@ module ActiveRecord
           fs << (has_not ? lambda {|row| not func.call(row[name]) } : lambda {|row| func.call(row[name])})
         end
 
-        lambda do |rows|
-          fs.inject(rows) {|r, f| r.select {|i| f.call(i) } }
+        #lambda do |rows|
+        #  fs.inject(rows) {|r, f| r.select {|i| f.call(i) } }
+        #end
+        lambda do |row|
+          fs.all? {|f| f.call(row) }
         end
       end
 
@@ -281,7 +302,7 @@ module ActiveRecord
         sqlopts = {}
         casopts = {}
 
-        # not implemented:
+        # XXX: not implemented
         # if order
         #   name, type = order.values_at(:name, :type)
         #   ...
