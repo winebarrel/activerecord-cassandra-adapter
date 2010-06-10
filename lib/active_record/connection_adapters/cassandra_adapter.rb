@@ -25,6 +25,8 @@ module ActiveRecord
 
   module ConnectionAdapters
     class CassandraAdapter < AbstractAdapter
+      SELF_KEY = '$'
+
       def initialize(client, logger, config)
         super(client, logger)
         @config = config
@@ -61,7 +63,7 @@ module ActiveRecord
           cf = parsed_sql[:table].to_sym
           cond = parsed_sql[:condition]
           count = parsed_sql[:count]
-          # not implemented:
+          # XXX: not implemented
           # distinct = parsed_sql[:distinct]
           sqlopts, casopts = rowopts(parsed_sql)
 
@@ -69,7 +71,7 @@ module ActiveRecord
             [{count => @connection.count_range(cf, casopts)}]
           elsif is_id?(cond)
             ks = [cond].flatten
-            rs = @connection.multi_get(cf, ks, casopts)
+            rs = @connection.multi_get(cf, ks, SELF_KEY, casopts)
             rows = []
 
             ks.each do |k|
@@ -224,9 +226,14 @@ module ActiveRecord
       private
       def key_slice_to_hash(key_slice)
         hash = {'id' => key_slice.key}
+        super_column = nil
 
-        key_slice.columns.each do |i|
-          column = i.column
+        key_slice.columns.each do |column|
+          super_column = column.super_column
+          break if super_column.name == SELF_KEY
+        end
+
+        super_column.columns.each do |column|
           hash[column.name] = column.value
         end
 
