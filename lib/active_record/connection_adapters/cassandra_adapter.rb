@@ -108,6 +108,8 @@ module ActiveRecord
       end
 
       def insert_sql(sql, name = nil, pk = nil, id_value = nil, sequence_name = nil)
+        # XXX: unique check
+
         log(sql, name) do
           parsed_sql = ActiveCassandra::SQLParser.new(sql).parse
           table = parsed_sql[:table]
