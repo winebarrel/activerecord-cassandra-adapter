@@ -146,11 +146,11 @@ module ActiveRecord
 
           if is_id?(cond)
             ks = [cond].flatten
-            rs = @connection.multi_get(cf, ks)
+            rs = @connection.multi_get(cf, ks, SELF_KEY)
 
             ks.each do |key|
               row = rs[key]
-              @connection.insert(cf, key, row.merge(nvs))
+              @connection.insert(cf, key, {SELF_KEY => row.merge(nvs)})
               n += 1
             end
           else
@@ -163,7 +163,7 @@ module ActiveRecord
             end
 
             rows.each do |row|
-              @connection.insert(cf, row['id'], row.merge(nvs))
+              @connection.insert(cf, row['id'], {SELF_KEY => row.merge(nvs)})
               n += 1
             end
           end
