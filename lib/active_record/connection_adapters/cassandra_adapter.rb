@@ -111,13 +111,11 @@ module ActiveRecord
           column_list = parsed_sql[:column_list]
           value_list = parsed_sql[:value_list]
 
+          class_name = ActiveRecord::Base.class_name(table)
+          rowid = Module.const_get(class_name).__identify.to_s
+
           nvs = {}
           column_list.zip(value_list).each {|n, v| nvs[n] = v.to_s }
-
-          unless (rowid = nvs['id'])
-            class_name = ActiveRecord::Base.class_name(table)
-            rowid = Module.const_get(class_name).__identify.to_s
-          end
 
           # XXX: insert with relation info
           @connection.insert(cf, rowid, {SELF_KEY => nvs})
