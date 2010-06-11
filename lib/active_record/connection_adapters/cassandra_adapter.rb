@@ -26,6 +26,8 @@ module ActiveRecord
   module ConnectionAdapters
     class CassandraAdapter < AbstractAdapter
       SELF_KEY = '$'
+      RELATION_CF_PREFIX = '_relation'
+      INDEX_CF_PREFIX = '_index'
 
       def initialize(client, logger, config)
         super(client, logger)
@@ -206,12 +208,14 @@ module ActiveRecord
         relation = (parent.class.__relations || {})[child.class.table_name.to_sym]
         return false unless relation
 
-        __associate_without_cascade(parent, child, relation)
+        __associate_from_cassandra_without_cascade(parent, child, relation)
 
         if relation[:cascade] == :rdb
-          # XXX:
+          relation_cf = "#{RELATION_CF_PREFIX}_#{child.class.table_name}".to_sym
+          identity = relation[:cascade_identifier] ?  relation[:cascade_identifier].call : parent.id
+          @connection.insert(relation_cf, child.id.to_s, {parent.class.table_name => {identity => parent.id}})
         elsif relation[:cascade]
-          __associate_without_cascade(child, parent, relation)
+          __associate_from_cassandra_without_cascade(child, parent, relation)
         end
 
         return true
@@ -223,12 +227,54 @@ module ActiveRecord
         relation = (parent.class.__relations || {})[child.class.table_name.to_sym]
         return false unless relation
 
-        __unassociate_without_cascade(parent, child, relation)
+        __unassociate_from_cassandra_without_cascade(parent, child, relation)
 
         if relation[:cascade] == :rdb
-          # XXX:
+          relation_cf = "#{RELATION_CF_PREFIX}_#{child.class.table_name}".to_sym
+          @connection.remove(relation_cf, child.id.to_s, parent.class.table_name, parent.id)
         elsif relation[:cascade]
-          __unassociate_without_cascade(child, parent, relation)
+          __unassociate_from_cassandra_without_cascade(child, parent, relation)
+        end
+
+        return true
+      end
+
+      def __rdb_to_cassandra_ids(parent, child_table)
+        relation_cf = "#{RELATION_CF_PREFIX}_#{parent.class.table_name}".to_sym
+        @connection.get(relation_cf, parent.id.to_s, child_table.to_s).values
+      end
+
+      def __associate_from_rdb(parent, child)
+        return false if (parent.blank? or child.blank?)
+
+        relation = (parent.class.__relations || {})[child.class.table_name.to_sym]
+        return false unless relation
+
+        relation_cf = "#{RELATION_CF_PREFIX}_#{parent.class.table_name}".to_sym
+        identity = relation[:identifier] ?  relation[:identifier].call : child.id
+        @connection.insert(relation_cf, parent.id.to_s, {child.class.table_name => {identity => child.id}})
+
+        if relation[:cascade]
+          child.send("#{parent.class.name.downcase}_id=", parent.id)
+          child.save!
+        end
+
+        return true
+      end
+
+      def __unassociate_from_rdb(parent, child)
+        return false if (parent.blank? or child.blank?)
+
+        relation = (parent.class.__relations || {})[child.class.table_name.to_sym]
+        return false unless relation
+
+        relation_cf = "#{RELATION_CF_PREFIX}_#{parent.class.table_name}".to_sym
+        identity = relation[:identifier] ?  relation[:identifier].call : child.id
+        @connection.remove(relation_cf, parent.id.to_s, child.class.table_name, child.id)
+
+        if relation[:cascade]
+          child.send("#{parent.class.name.downcase}_id=", nil)
+          child.save!
         end
 
         return true
@@ -236,13 +282,13 @@ module ActiveRecord
 
       private #######################################################
 
-      def __associate_without_cascade(parent, child, relation)
-        identity = relation[:identifier] ?  relation[:identifier].call : child.id
-        @connection.insert(parent.class.table_name.to_sym, parent.id, {child.class.table_name => {identity => child.id}})
+      def __associate_from_cassandra_without_cascade(parent, child, relation)
+        identity = relation[:identifier] ?  relation[:identifier].call : child.id.to_s
+        @connection.insert(parent.class.table_name.to_sym, parent.id.to_s, {child.class.table_name => {identity => child.id.to_s}})
       end
 
-      def __unassociate_without_cascade(parent, child, relation)
-        @connection.remove(parent.class.table_name.to_sym, parent.id, child.class.table_name, child.id)
+      def __unassociate_from_cassandra_without_cascade(parent, child, relation)
+        @connection.remove(parent.class.table_name.to_sym, parent.id.to_s, child.class.table_name, child.id.to_s)
       end
 
       def select_with_condition(cf, cond, casopts = {})
