@@ -1,3 +1,4 @@
+require 'active_support'
 require 'active_record/base'
 require 'active_record/connection_adapters/abstract_adapter'
 require 'cassandra'
@@ -145,7 +146,7 @@ module ActiveRecord
               n += 1
             end
           else
-            select_with_condition(cf, cond, :key_only => true) do |k|
+            select_with_condition(cf, cond) do |k, v|
               @connection.insert(cf, k, {SELF_KEY => nvs})
               n += 1
             end
@@ -169,7 +170,7 @@ module ActiveRecord
               n += 1
             end
           else # is_id?(cond)
-            select_with_condition(cf, cond, :key_only => true) do |k|
+            select_with_condition(cf, cond) do |k, v|
               @connection.remove(cf, k)
               n += 1
             end
@@ -280,6 +281,29 @@ module ActiveRecord
         return true
       end
 
+      def __create_index(table_klass, column)
+        table = table_klass.table_name
+        index = (table_klass.__indexes || {})[column.to_sym]
+        return false unless index
+
+        column = column.to_s
+        index_cf = "#{INDEX_CF_PREFIX}_#{table}_#{column}".to_sym
+        @connection.clear_column_family!(index_cf)
+
+        @connection.get_range(table.to_sym).each do |key_slice|
+          next if key_slice.columns.length.zero?
+          row = key_slice_to_hash(key_slice)
+
+          row.each do |col, val|
+            next if col != column
+            identity = index[:identifier] ? index[:identifier].call : key_slice.key
+            @connection.insert(index_cf, val, {identity => key_slice.key})
+          end
+        end
+
+        return true
+      end
+
       private #######################################################
 
       def __associate_from_cassandra_without_cascade(parent, child, relation)
@@ -292,79 +316,34 @@ module ActiveRecord
       end
 
       def select_with_condition(cf, cond, casopts = {})
-        key_only = casopts.delete(:key_only)
-        rs = @connection.get_range(cf, casopts)
-        selector = filter(cond)
+        prefetched_keys = keys_from_index(cf, cond)
+        return [] unless prefetched_keys
 
-        if key_only
-          if block_given?
-            if cond.empty?
-              rs.each {|key_slice|
-                next if key_slice.columns.length.zero?
-                row = key_slice.key
-                yield(row)
-              }
-            else
-              rs.each {|key_slice|
-                next if key_slice.columns.length.zero?
-                row = key_slice_to_hash(key_slice)
-                yield(row['id']) if selector.call(row)
-              }
-            end
-          else # if block_given?
-            rows = []
+        selector = cond.empty? ? lambda { true } : filter(cond)
+        rows = []
 
-            if cond.empty?
-              rs.each {|key_slice|
-                next if key_slice.columns.length.zero?
-                row = key_slice.key
-                rows << row
-              }
-            else
-              rs.each {|key_slice|
-                next if key_slice.columns.length.zero?
-                row = key_slice_to_hash(key_slice)
-                rows << row['id'] if selector.call(row)
-              }
-            end
+        if prefetched_keys.empty?
+          @connection.get_range(cf, casopts).each {|key_slice|
+            next if key_slice.columns.length.zero?
+            row = key_slice_to_hash(key_slice)
+            rows << row if selector.call(row)
+          }
+        else
+          @connection.multi_get(cf, prefetched_keys).each {|key, row|
+            row = row[SELF_KEY]
+            next if row.length.zero?
+            row['id'] = key
+            rows << row if selector.call(row)
+          }
+        end
 
-            return rows
-          end # if block_given?
-        else # if key_only
-          if block_given?
-            if cond.empty?
-              rs.each {|key_slice|
-                next if key_slice.columns.length.zero?
-                row = key_slice_to_hash(key_slice)
-                yield(row)
-              }
-            else
-              rs.each {|key_slice|
-                next if key_slice.columns.length.zero?
-                row = key_slice_to_hash(key_slice)
-                yield(row) if selector.call(row)
-              }
-            end
-          else # if block_given?
-            rows = []
+        if block_given?
+          rows.each do |row|
+            yield(row['id'], row)
+          end
+        end
 
-            if cond.empty?
-              rs.each {|key_slice|
-                next if key_slice.columns.length.zero?
-                row = key_slice_to_hash(key_slice)
-                rows << row
-              }
-            else
-              rs.each {|key_slice|
-                next if key_slice.columns.length.zero?
-                row = key_slice_to_hash(key_slice)
-                rows << row if selector.call(row)
-              }
-            end
-
-            return rows
-          end # if block_given?
-        end # if key_only
+        return rows
       end
 
       def key_slice_to_hash(key_slice)
@@ -385,6 +364,40 @@ module ActiveRecord
 
       def is_id?(cond)
         not cond.kind_of?(Array) or not cond.all? {|i| i.kind_of?(Hash) }
+      end
+
+      def keys_from_index(cf, cond)
+        class_name = ActiveRecord::Base.class_name(cf.to_s)
+        klass = Module.const_get(class_name)
+
+        indexed_columns = {}
+
+        cond.each do |c| 
+          name, op, expr, has_not = c.values_at(:name, :op, :expr, :not)
+          name = name.split('.').last
+
+          if op = :'=' and not expr.blank? and not has_not and klass.__has_index(name)
+            indexed_columns[name] = expr
+          end
+        end
+
+        return [] if indexed_columns.empty?
+
+        cond.reject! do |c|
+          name, op, expr, has_not = c.values_at(:name, :op, :expr, :not)
+          name = name.split('.').last
+          indexed_columns.has_key?(name)
+        end
+
+        keys = nil
+
+        indexed_columns.each do |name, expr|
+          index_cf = "#{INDEX_CF_PREFIX}_#{cf}_#{name}".to_sym
+          rs = @connection.get(index_cf, expr.to_s)
+          keys = keys ? (keys & rs.values) : rs.values
+        end
+
+        return keys.empty? ? nil : keys
       end
 
       def filter(cond)

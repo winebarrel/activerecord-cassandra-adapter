@@ -71,6 +71,23 @@ module ActiveCassandra
         def __relations
           @__relations
         end
+
+        def index(column, options = {})
+          @__indexes ||= {}
+          @__indexes[column.to_sym] = options
+        end
+
+        def __indexes
+          @__indexes
+        end
+
+        def __has_index(column)
+          @__indexes and @__indexes.has_key?(column.to_sym)
+        end
+
+        def create_index(column)
+          self.connection.__create_index(self, column)
+        end
       }
     end
   end
