@@ -205,6 +205,7 @@ rule
                           }
 
   op                    : IN     { '$in'     }
+                        | IS     { :'='      }
                         | REGEXP { '$regexp' }
                         | '<>'   { :'!='     }
                         | '!='   { :'!='     }
@@ -241,6 +242,7 @@ KEYWORDS = %w(
   IN
   INSERT
   INTO
+  IS
   LIMIT
   NOT
   OFFSET
