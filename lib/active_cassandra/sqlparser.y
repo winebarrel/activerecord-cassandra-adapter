@@ -107,11 +107,15 @@ rule
                           }
                         | between_predicate
                         | not_in_predicate
-                        | is_not_predicate
+                        | null_predicate
 
-  is_not_predicate      : id IS NOT value
+  null_predicate        : id IS NULL
                           {
-                            {:name => val[0], :op => :'==', :expr => val[2]i, :not => true}
+                            {:name => val[0], :op => :'==', :expr => val[2]}
+                          }
+                        | id IS NOT NULL
+                          {
+                            {:name => val[0], :op => :'==', :expr => val[2], :not => true}
                           }
 
   between_predicate     : id BETWEEN value AND value
@@ -211,7 +215,6 @@ rule
                           }
 
   op                    : IN     { '$in'     }
-                        | IS     { :'=='     }
                         | REGEXP { '$regexp' }
                         | '<>'   { :'!='     }
                         | '!='   { :'!='     }
