@@ -107,6 +107,12 @@ rule
                           }
                         | between_predicate
                         | not_in_predicate
+                        | is_not_predicate
+
+  is_not_predicate      : id IS NOT value
+                          {
+                            {:name => val[0], :op => :'==', :expr => val[2]i, :not => true}
+                          }
 
   between_predicate     : id BETWEEN value AND value
                           {
