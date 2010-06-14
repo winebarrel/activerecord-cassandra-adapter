@@ -736,7 +736,7 @@ module_eval(<<'.,.,', 'sqlparser.y', 206)
 
 module_eval(<<'.,.,', 'sqlparser.y', 207)
   def _reduce_59(val, _values)
-     :'='      
+     :'=='     
   end
 .,.,
 
