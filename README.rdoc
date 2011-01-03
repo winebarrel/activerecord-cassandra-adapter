@@ -1,0 +1,69 @@
+= activerecord-cassandra-adapter
+
+Copyright (c) 2010 SUGAWARA Genki <sgwr_dts@yahoo.co.jp>
+
+== Description
+
+activerecord-cassandra-adapter is a Cassandra adapter for ActiveRecord.
+
+activerecord-cassandra-adapter depend on Cassandra Ruby Driver.
+
+see http://rubygems.org/gems/cassandra
+
+== Homepage
+
+https://bitbucket.org/winebarrel/activerecord-cassandra-adapter
+
+== Install
+
+gem install activerecord-cassandra-adapter
+
+== Example
+=== database.yml
+
+    development:
+      adapter:  cassandra
+      host:     127.0.0.1
+      port:     9160
+      keyspace: employees
+
+=== Model
+
+    class Employee < ActiveRecord::Base
+      include ActiveCassandra::CF
+
+      # identifier lambda { Time.now.tv_sec }
+    end
+
+=== ActiveRecord API
+
+    # see http://api.rubyonrails.org/classes/ActiveRecord/Base.html
+    
+    emp = Emp.find(:first, 
+            :conditions => ["job = ? and sal >= ?", "MANAGER", 2800],
+            :limit => 3, :offset => 1)
+    
+    p emp.id #=> "a198f990-719d-11df-974a-37650c93e624"
+    emp.age = 30
+    emp.save
+    
+    emp_list = Emp.find(:all, :conditions => {:empno => [7654, 7698, 7782]})
+    
+    emp_list.each do |i|
+      i.destroy if i.sal < 2000
+    end
+    
+    new_emp = Emp.new
+    new_emp.empno = 8000
+    new_emp.ename = 'YAMADA'
+    new_emp.age   = 27
+    new_emp.save!
+    
+    # not available: JOIN, ORDER, OR and etc...
+    # see http://github.com/winebarrel/activerecord-cassandra-adapter/blob/master/lib/active_cassandra/sqlparser.y
+
+=== Low layer API
+
+    Emp.cassandra_client do |client|
+      ...
+    end
